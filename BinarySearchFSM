@@ -1,0 +1,175 @@
+LIBRARY IEEE;
+USE IEEE.STD_LOGIC_1164.ALL;
+USE ieee.numeric_std.all;
+--USE IEEE.std_logic_unsigned.all;
+
+entity binary_search is
+  port (
+    clk : in std_logic;
+    rst : in std_logic;
+    start_search : in std_logic;
+    search_value : in std_logic_vector(15 downto 0);
+    search_done : out std_logic;
+    found : out std_logic;
+    index_found : out std_logic_vector(11 downto 0);
+    occurence : out std_logic_vector(11 downto 0)
+);
+end entity;
+
+architecture rtl of binary_search is
+type state_type is (STATE_IDLE,STATE_READ,STATE_WAIT,STATE_COMP1,STATE_CHECK1,STATE_READ2,STATE_WAIT2,STATE_COMP2,STATE_CHECK2,STATE_DONE);
+signal BIN_FSM : state_type;
+signal address_sig : std_logic_vector(11 downto 0);
+signal DATA_OUT : std_logic_vector(15 downto 0);
+signal L : signed(13 downto 0);	
+Signal H : signed(13 downto 0);
+Signal M : signed(13 downto 0);
+signal FIRST_MATCH_INDEX : signed(13 downto 0);
+signal first_index : signed(13 downto 0);
+signal last_index : signed(13 downto 0);
+signal found_sig : std_logic;
+signal occurence_sig : signed(13 downto 0);
+
+begin
+    
+    p_fsm : process(clk, rst) 
+    begin
+        if rst = '1' then
+            BIN_FSM <= STATE_IDLE;
+            L <= (others => '0');
+            H <= to_signed(2**12-1,14);
+            M <= to_signed(2**11-1,14);
+            FIRST_MATCH_INDEX <= (others => '0');   
+            first_index <= to_signed(2**12-1,14);
+            last_index <= (others => '0'); 
+            search_done <= '0';
+            found_sig <= '0';
+            index_found <= (others => '0');
+            occurence_sig <= (others => '0');
+
+        elsif rising_edge(clk) then
+            --fsm body
+            case BIN_FSM is 
+                when STATE_IDLE =>
+                    if (start_search = '1') THEN
+                        search_done <= '0';
+                        found_sig <= '0';
+                        L <= (others => '0');
+                        H <= to_signed(2**12-1,14);
+                        M <= to_signed(2**11-1,14);
+                        FIRST_MATCH_INDEX <= (others => '0');
+                        first_index <= to_signed(2**12-1,14);
+                        last_index <= (others => '0'); 
+                        occurence_sig <= (others => '0');
+                        BIN_FSM <= STATE_READ;
+                    end if;
+                    
+                when STATE_READ =>
+
+                    BIN_FSM <= STATE_WAIT;
+                
+                
+                when STATE_WAIT =>
+                
+                    BIN_FSM <= STATE_COMP1;
+                
+                when STATE_COMP1 =>
+
+                    BIN_FSM <= STATE_CHECK1;
+                    
+                    if (search_value < DATA_OUT) then
+                       H <= M - 1;
+                    ELSIF (search_value > DATA_OUT) then    
+                      L <= M + 1;    
+                    else    
+                        found_sig <= '1';
+                        if found_sig = '0' THEN
+                            FIRST_MATCH_INDEX <= M;
+                            last_index <= M;
+                        END IF;
+                        H <= M - 1;
+                        if (first_index > M) then 
+                            first_index <= M;
+                        end if;        
+                    end if;
+                
+                when STATE_CHECK1 =>
+                
+                    if (L > H) and found_sig = '1' then        
+                        BIN_FSM <= STATE_READ2;
+                        L <= FIRST_MATCH_INDEX + 1;
+                        H <= to_signed(4095,14);
+                        M <= FIRST_MATCH_INDEX + 1;
+                    elsif (L > H) and found_sig = '0' then    
+                        BIN_FSM <= STATE_DONE;
+                         M <= SHIFT_RIGHT((L + H),1);
+                    else    
+                        BIN_FSM <= STATE_READ;
+                         M <= SHIFT_RIGHT((L + H),1);
+                    end if;
+                    
+--                    M <= SHIFT_RIGHT((L + H),1);
+                    
+                
+                when STATE_READ2 =>
+               
+                    BIN_FSM <= STATE_WAIT2;
+                    
+                when STATE_WAIT2 =>
+                
+                    BIN_FSM <= STATE_COMP2;
+                
+                when STATE_COMP2 =>
+                
+                     BIN_FSM <= STATE_CHECK2;
+                
+                    if (DATA_OUT > search_value) then
+                        H <= M - 1;
+                    elsif (DATA_OUT < search_value) then    
+                        L <= M + 1;
+                    else 
+                        found_sig <= '1';
+                        if (last_index <= M) then    
+                            last_index <= M;                    
+                        end if;
+                        L <= M + 1; 
+                    end if;
+                    
+                when STATE_CHECK2 =>
+                
+                    if (L > H) and found_sig = '1' then
+                        BIN_FSM <= STATE_DONE;
+                    else
+                        BIN_FSM <= STATE_READ2;
+                    end if;
+                    
+                    M <= SHIFT_RIGHT((L + H),1);
+                
+                when STATE_DONE =>
+                    search_done <= '1';
+                    index_found <= std_logic_vector(first_index(11 downto 0));
+                    if(last_index = first_index) then        
+                        occurence_sig <= to_signed(1,14);
+                        BIN_FSM <= STATE_IDLE;
+                    else
+                        occurence_sig <= last_index - first_index + 1;
+                        BIN_FSM <= STATE_IDLE;
+                    end if;
+            end case;
+        end if;
+    end process;
+
+
+address_sig <= std_logic_vector(M(11 DOWNTO 0)); -- Here because you don't want to wait more clks for M to register, happens instantly
+found <= found_sig;
+occurence <= std_logic_vector(occurence_sig(11 DOWNTO 0));
+
+
+MEMINST: entity work.mem4096x16
+PORT MAP(
+  clk            => clk,
+  address        => address_sig,
+  data           => DATA_OUT
+);
+
+end architecture;
